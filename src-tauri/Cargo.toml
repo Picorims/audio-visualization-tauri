@@ -1,10 +1,10 @@
 [package]
 name = "audio-visualization-tauri"
-version = "0.0.0"
+version = "1.0.0"
 description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+authors = ["Picorims<picorims.contact@gmail.com>"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Picorims/audio-visualization-tauri.git"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
