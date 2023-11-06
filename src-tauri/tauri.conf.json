@@ -21,7 +21,7 @@
           {
             "name": "ffmpeg",
             "sidecar": true,
-            "args": ["-i", {"validator": "\\S+"}, "-f", "s16le", "-acodec", "pcm_s16le", {"validator": "\\S+"}]
+            "args": ["-i", {"validator": "\\S+"}, "-ar", "44100", "-ac", "1", "-f", "s16le", "-acodec", "pcm_s16le", {"validator": "\\S+"}]
           }
         ]
       },
@@ -29,7 +29,7 @@
         "all": false,
         "ask": false,
         "confirm": false,
-        "message": false,
+        "message": true,
         "open": true,
         "save": false
       }

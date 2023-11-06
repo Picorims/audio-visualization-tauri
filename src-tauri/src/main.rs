@@ -17,14 +17,20 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+use std::fs;
+
+// the payload type must implement `Serialize` and `Clone`.
+#[derive(Clone, serde::Serialize)]
+struct AudioCachedPayload {
+    error: bool,
+    message: String
 }
 
+/**
+ * Copy the audio file specified in `path` into raw PCM data.
+ */
 #[tauri::command]
-fn cache_audio(app_handle: tauri::AppHandle, path: &str) -> Result<(), String> {
+fn cache_audio(app_handle: tauri::AppHandle, window: tauri::Window, path: &str) -> Result<(), String> {
     use tauri::api::process::{Command, CommandEvent};
 
     let tmp_dir = app_handle
@@ -32,40 +38,58 @@ fn cache_audio(app_handle: tauri::AppHandle, path: &str) -> Result<(), String> {
         .app_cache_dir()
         .expect("couldn't find cache directory");
 
+    let out_path = tmp_dir.join("audio.raw");
+
+    if out_path.exists() {
+        fs::remove_file(out_path.to_str().expect("couldn't convert output path")).expect("could not delete existing file");
+    }
+
     let (mut rx, mut child) = Command::new_sidecar("ffmpeg")
         .expect("failed to create `ffmpeg` binary command")
         .args([
             "-i",
             path,
+            "-ar",
+            "44100", //44100 Hz
+            "-ac",
+            "1", // mono
             "-f",
-            "s16le",
+            "s16le", //PCM signed 16-bit little-endian
             "-acodec",
             "pcm_s16le",
-            tmp_dir
-                .join("audio.raw")
+            out_path
                 .to_str()
                 .expect("couldn't create ffmpeg output path"),
         ])
         .spawn()
         .expect("Failed to spawn ffmpeg");
-
-    // tauri::async_runtime::spawn(async move {
-    //     // read events such as stdout
-    //     while let Some(event) = rx.recv().await {
-    //         if let CommandEvent::Stdout(line) = event {
-    //             window
-    //                 .emit("message", Some(format!("'{}'", line)))
-    //                 .expect("failed to emit event");
-    //         }
-    //     }
-    // });
+        
+    tauri::async_runtime::spawn(async move {
+        // read events
+        while let Some(event) = rx.recv().await {
+            if let CommandEvent::Terminated(payload) = event {
+                if payload.code != Some(0) {
+                    window
+                        .emit("audio_cached", AudioCachedPayload {error: true, message: "FFmpeg terminated with an error.".into()})
+                        .expect("failed to emit audio_cached event (1)");
+                } else {
+                    window
+                        .emit("audio_cached", AudioCachedPayload {error: false, message: "success".into()})
+                        .expect("failed to emit audio_cached event (2)");
+                }
+            } else if let CommandEvent::Error(e) = event {
+                window
+                    .emit("audio_cached", AudioCachedPayload {error: false, message: e})
+                    .expect("failed to emit audio_cached event (3)");
+            }
+        }
+    });
 
     Ok(())
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![greet])
         .invoke_handler(tauri::generate_handler![cache_audio])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
