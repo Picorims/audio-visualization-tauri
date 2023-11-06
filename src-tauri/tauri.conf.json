@@ -15,19 +15,38 @@
       "all": false,
       "shell": {
         "all": false,
-        "open": true
+        "open": true,
+        "sidecar": true,
+        "scope": [
+          {
+            "name": "ffmpeg",
+            "sidecar": true,
+            "args": ["-i", {"validator": "\\S+"}, "-f", "s16le", "-acodec", "pcm_s16le", {"validator": "\\S+"}]
+          }
+        ]
+      },
+      "dialog": {
+        "all": false,
+        "ask": false,
+        "confirm": false,
+        "message": false,
+        "open": true,
+        "save": false
       }
     },
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.tauri.dev",
+      "identifier": "com.picorims.audio-visualization-tauri",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
+      ],
+      "externalBin": [
+        "binaries/ffmpeg"
       ]
     },
     "security": {

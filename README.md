@@ -1,10 +1,16 @@
 # Audio visualization experiment in Tauri
 
-Testing audio visualization in Tauri as a replacement for Electron as part of Wav2Bar rewrite.
+Testing audio visualization in Tauri **on Windows*** as a replacement for Electron as part of Wav2Bar rewrite.
+
+(*) To run on Linux, providing an ffmpeg linux binary is necessary. 
 
 ## Recommended IDE Setup
 
 [VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+
+## Dev use
+
+- `npm install`
 
 ## License
 

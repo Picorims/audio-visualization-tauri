@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -24,9 +23,50 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[tauri::command]
+fn cache_audio(app_handle: tauri::AppHandle, path: &str) -> Result<(), String> {
+    use tauri::api::process::{Command, CommandEvent};
+
+    let tmp_dir = app_handle
+        .path_resolver()
+        .app_cache_dir()
+        .expect("couldn't find cache directory");
+
+    let (mut rx, mut child) = Command::new_sidecar("ffmpeg")
+        .expect("failed to create `ffmpeg` binary command")
+        .args([
+            "-i",
+            path,
+            "-f",
+            "s16le",
+            "-acodec",
+            "pcm_s16le",
+            tmp_dir
+                .join("audio.raw")
+                .to_str()
+                .expect("couldn't create ffmpeg output path"),
+        ])
+        .spawn()
+        .expect("Failed to spawn ffmpeg");
+
+    // tauri::async_runtime::spawn(async move {
+    //     // read events such as stdout
+    //     while let Some(event) = rx.recv().await {
+    //         if let CommandEvent::Stdout(line) = event {
+    //             window
+    //                 .emit("message", Some(format!("'{}'", line)))
+    //                 .expect("failed to emit event");
+    //         }
+    //     }
+    // });
+
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![cache_audio])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
