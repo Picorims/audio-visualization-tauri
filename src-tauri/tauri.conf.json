@@ -32,6 +32,22 @@
         "message": true,
         "open": true,
         "save": false
+      },
+      "fs": {
+        "all": false,
+        "readFile": true,
+        "removeFile": true,
+        "renameFile": true,
+        "copyFile": true,
+        "scope": ["$APPCACHE/*"]
+      },
+      "protocol": {
+        "all": false,
+        "asset": true,
+        "assetScope": ["$APPCACHE/**"]
+      },
+      "path": {
+        "all": true
       }
     },
     "bundle": {

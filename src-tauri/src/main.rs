@@ -23,14 +23,21 @@ use std::fs;
 #[derive(Clone, serde::Serialize)]
 struct AudioCachedPayload {
     error: bool,
-    message: String
+    message: String,
 }
+
+static mut FFT_CACHE: Vec<Vec<rustfft::num_complex::Complex<f32>>> = Vec::new();
+const FFT_SIZE: usize = 4096;
 
 /**
  * Copy the audio file specified in `path` into raw PCM data.
  */
 #[tauri::command]
-fn cache_audio(app_handle: tauri::AppHandle, window: tauri::Window, path: &str) -> Result<(), String> {
+fn cache_audio(
+    app_handle: tauri::AppHandle,
+    window: tauri::Window,
+    path: &str,
+) -> Result<(), String> {
     use tauri::api::process::{Command, CommandEvent};
 
     let tmp_dir = app_handle
@@ -41,10 +48,11 @@ fn cache_audio(app_handle: tauri::AppHandle, window: tauri::Window, path: &str) 
     let out_path = tmp_dir.join("audio.raw");
 
     if out_path.exists() {
-        fs::remove_file(out_path.to_str().expect("couldn't convert output path")).expect("could not delete existing file");
+        fs::remove_file(out_path.to_str().expect("couldn't convert output path"))
+            .expect("could not delete existing file");
     }
 
-    let (mut rx, mut child) = Command::new_sidecar("ffmpeg")
+    let (mut rx, _child) = Command::new_sidecar("ffmpeg")
         .expect("failed to create `ffmpeg` binary command")
         .args([
             "-i",
@@ -63,24 +71,57 @@ fn cache_audio(app_handle: tauri::AppHandle, window: tauri::Window, path: &str) 
         ])
         .spawn()
         .expect("Failed to spawn ffmpeg");
-        
+
     tauri::async_runtime::spawn(async move {
         // read events
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Terminated(payload) = event {
                 if payload.code != Some(0) {
                     window
-                        .emit("audio_cached", AudioCachedPayload {error: true, message: "FFmpeg terminated with an error.".into()})
+                        .emit(
+                            "audio_cached",
+                            AudioCachedPayload {
+                                error: true,
+                                message: "FFmpeg terminated with an error.".into(),
+                            },
+                        )
                         .expect("failed to emit audio_cached event (1)");
                 } else {
-                    window
-                        .emit("audio_cached", AudioCachedPayload {error: false, message: "success".into()})
-                        .expect("failed to emit audio_cached event (2)");
+                    match cache_fft(&out_path) {
+                        Ok(()) => {
+                            window
+                                .emit(
+                                    "audio_cached",
+                                    AudioCachedPayload {
+                                        error: false,
+                                        message: "success".into(),
+                                    },
+                                )
+                                .expect("failed to emit audio_cached event (2)");
+                        }
+                        Err(e) => {
+                            window
+                                .emit(
+                                    "audio_cached",
+                                    AudioCachedPayload {
+                                        error: false,
+                                        message: e,
+                                    },
+                                )
+                                .expect("failed to emit audio_cached event (3)");
+                        }
+                    }
                 }
             } else if let CommandEvent::Error(e) = event {
                 window
-                    .emit("audio_cached", AudioCachedPayload {error: false, message: e})
-                    .expect("failed to emit audio_cached event (3)");
+                    .emit(
+                        "audio_cached",
+                        AudioCachedPayload {
+                            error: false,
+                            message: e,
+                        },
+                    )
+                    .expect("failed to emit audio_cached event (4)");
             }
         }
     });
@@ -88,9 +129,89 @@ fn cache_audio(app_handle: tauri::AppHandle, window: tauri::Window, path: &str) 
     Ok(())
 }
 
+/**
+ * Cache FFT for each frame
+ */
+fn cache_fft(path: &std::path::Path) -> Result<(), String> {
+    use rustfft::{num_complex::Complex, FftPlanner};
+    use std::fs::File;
+    use std::io::Read; // necessary for file.by_ref()
+
+    const RATE: usize = 44100;
+    let mut file = File::open(path).expect("Could not open file for FFT processing");
+
+    // for future: https://stackoverflow.com/questions/55555538/what-is-the-correct-way-to-read-a-binary-file-in-chunks-of-a-fixed-size-and-stor
+
+    // put file in memory
+    let mut buffer = Vec::new();
+    file.by_ref()
+        .read_to_end(&mut buffer)
+        .expect("Couldn't read PCM data");
+    let len = buffer.len()/2; // /2 because two u8 => u16 = 1 value !!!
+    let duration = len / RATE; // in seconds
+
+    let mut frame: usize = 0;
+    const FPS: usize = 60;
+
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(FFT_SIZE);
+
+    loop {
+        // process 1 frame
+        frame += 1;
+        println!("Frame: {}", frame);
+        if frame / FPS > duration {
+            break;
+        }
+        let center: isize = (RATE / FPS * frame) as isize;
+        let from: isize = center - (FFT_SIZE / 2) as isize;
+        let to: isize = center + (FFT_SIZE / 2) as isize;
+        let mut buffer_fft: Vec<Complex<f32>> = Vec::new();
+
+        println!("From: {}, To: {}", from, to);
+        for i in from..to
+        /*excluded*/
+        {
+            if i < 0 || i > (buffer.len()/2 - 1) as isize {
+                buffer_fft.push(Complex { re: 0.0, im: 0.0 });
+            } else {
+                let j: usize = i.try_into().unwrap();
+                buffer_fft.push(Complex {
+                    re: ((buffer[2*j] as u16) << 8 | buffer[2*j+1] as u16).try_into().unwrap(),
+                    im: 0.0,
+                });
+            }
+        }
+
+        fft.process(&mut buffer_fft);
+        unsafe {
+            FFT_CACHE.push(buffer_fft.clone());
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_frame_fft(frame: usize) -> Vec<f32> {
+    let mut vector: Vec::<f32> = Vec::new();
+    let cache_clone: Vec<rustfft::num_complex::Complex<f32>>; 
+    unsafe {
+        cache_clone = FFT_CACHE[frame].clone();
+    }
+
+    // println!("{cache_clone}");
+
+    for i in 0..cache_clone.len() {
+        vector.push((cache_clone[i]*1.0/(FFT_SIZE as f32).sqrt()).norm());
+    }
+
+    return vector;
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![cache_audio])
+        .invoke_handler(tauri::generate_handler![cache_audio, get_frame_fft])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
