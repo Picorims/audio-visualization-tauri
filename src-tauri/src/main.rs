@@ -19,6 +19,8 @@
 
 use std::fs;
 
+use spectrum_analyzer::{Frequency, FrequencySpectrum, FrequencyValue};
+
 // the payload type must implement `Serialize` and `Clone`.
 #[derive(Clone, serde::Serialize)]
 struct AudioCachedPayload {
@@ -26,8 +28,8 @@ struct AudioCachedPayload {
     message: String,
 }
 
-static mut FFT_CACHE: Vec<Vec<rustfft::num_complex::Complex<f32>>> = Vec::new();
-const FFT_SIZE: usize = 4096;
+static mut FFT_CACHE: Vec<FrequencySpectrum> = Vec::new();
+const FFT_SIZE: usize = 16384;
 
 /**
  * Copy the audio file specified in `path` into raw PCM data.
@@ -133,7 +135,10 @@ fn cache_audio(
  * Cache FFT for each frame
  */
 fn cache_fft(path: &std::path::Path) -> Result<(), String> {
-    use rustfft::{num_complex::Complex, FftPlanner};
+    use spectrum_analyzer::scaling::divide_by_N;
+    use spectrum_analyzer::windows::hann_window;
+    use spectrum_analyzer::{samples_fft_to_spectrum, FrequencyLimit};
+    
     use std::fs::File;
     use std::io::Read; // necessary for file.by_ref()
 
@@ -143,18 +148,25 @@ fn cache_fft(path: &std::path::Path) -> Result<(), String> {
     // for future: https://stackoverflow.com/questions/55555538/what-is-the-correct-way-to-read-a-binary-file-in-chunks-of-a-fixed-size-and-stor
 
     // put file in memory
-    let mut buffer = Vec::new();
+    let mut buffer_read = Vec::new();
     file.by_ref()
-        .read_to_end(&mut buffer)
+        .read_to_end(&mut buffer_read)
         .expect("Couldn't read PCM data");
-    let len = buffer.len()/2; // /2 because two u8 => u16 = 1 value !!!
+    
+    // convert to i16 vector (two u8 are already a i16 value as per ffmpeg arguments)
+    let mut buffer: Vec<i16> = Vec::new();
+    for i in 0..buffer_read.len() / 2 {
+        let mut bytes: [u8; 2] = [0; 2];
+        bytes.copy_from_slice(&buffer_read[i * 2..i * 2 + 2]);
+        let value = i16::from_le_bytes(bytes);
+        buffer.push(value);
+    }
+
+    let len = buffer.len();
     let duration = len / RATE; // in seconds
 
     let mut frame: usize = 0;
     const FPS: usize = 60;
-
-    let mut planner = FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(FFT_SIZE);
 
     loop {
         // process 1 frame
@@ -166,26 +178,29 @@ fn cache_fft(path: &std::path::Path) -> Result<(), String> {
         let center: isize = (RATE / FPS * frame) as isize;
         let from: isize = center - (FFT_SIZE / 2) as isize;
         let to: isize = center + (FFT_SIZE / 2) as isize;
-        let mut buffer_fft: Vec<Complex<f32>> = Vec::new();
+        let mut buffer_fft: Vec<f32> = Vec::new();
 
         println!("From: {}, To: {}", from, to);
         for i in from..to
         /*excluded*/
         {
-            if i < 0 || i > (buffer.len()/2 - 1) as isize {
-                buffer_fft.push(Complex { re: 0.0, im: 0.0 });
+            if i < 0 || i > (buffer.len() - 1) as isize {
+                buffer_fft.push(0.0);
             } else {
                 let j: usize = i.try_into().unwrap();
-                buffer_fft.push(Complex {
-                    re: ((buffer[2*j] as u16) << 8 | buffer[2*j+1] as u16).try_into().unwrap(),
-                    im: 0.0,
-                });
+                buffer_fft.push(buffer[j].try_into().unwrap());
             }
         }
 
-        fft.process(&mut buffer_fft);
+        let hann_window = hann_window(&buffer_fft);
+        let spectrum = samples_fft_to_spectrum(
+            &hann_window,
+            RATE as u32,
+            FrequencyLimit::All,
+            Some(&divide_by_N)
+        ).unwrap();
         unsafe {
-            FFT_CACHE.push(buffer_fft.clone());
+            FFT_CACHE.push(spectrum);
         }
     }
 
@@ -193,20 +208,24 @@ fn cache_fft(path: &std::path::Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_frame_fft(frame: usize) -> Vec<f32> {
-    let mut vector: Vec::<f32> = Vec::new();
-    let cache_clone: Vec<rustfft::num_complex::Complex<f32>>; 
+fn get_frame_fft(frame: usize) -> Vec<(f32, f32)> {
+    let &cached_spectrum; 
+    let length ;
     unsafe {
-        cache_clone = FFT_CACHE[frame].clone();
+        length = FFT_CACHE.len();
+    }
+    if frame >= length {
+        return vec![(-1.0, -1.0);FFT_SIZE];
+    }
+    unsafe {
+        cached_spectrum = &FFT_CACHE[frame];
     }
 
-    // println!("{cache_clone}");
-
-    for i in 0..cache_clone.len() {
-        vector.push((cache_clone[i]*1.0/(FFT_SIZE as f32).sqrt()).norm());
-    }
-
-    return vector;
+    return cached_spectrum
+        .data()
+        .iter()
+        .map(|f| (f.0.val(), f.1.val()))
+        .collect();
 }
 
 fn main() {

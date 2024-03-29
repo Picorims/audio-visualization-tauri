@@ -7,7 +7,7 @@
   let audio: HTMLAudioElement | null = null;
   let playing = false;
   let fps = 60;
-  let fftCache: number[][] = [];
+  let fftCache: Array<Array<[number, number]>> = [];
 
   function init() {
     console.log("init pixi...");
@@ -37,16 +37,16 @@
       if (fftCache[frame] === undefined) {
         return;
       }
-      let fft = LinearToLog(MappedArray(fftCache[frame], COUNT, 1, fftCache[frame].length-1));
-      const max = Math.max(...fft);
-      fft = fft.map((x) => x / max);
+      let fft = fftCache[frame].map(([_, value]) => value);
+      fft = fft.map((value) => (1 - Math.exp(-value/32)) * 255 );//(amplification with ceiling) * (scale to 0-255)
+      fft = MappedArray(LinearToLog(fft), COUNT, 0, fftCache[frame].length-1);
 
       visualizer.clear();
       visualizer.beginFill("#ffffff");
   
       for (let i = 0; i < COUNT; i++) {
         const width = 2;
-        const height = fft[i] * 255;
+        const height = fft[i];
         const x = i * (app.screen.width / COUNT);
         const y = 200 - height;
         visualizer.drawRect(x, y, width, height);

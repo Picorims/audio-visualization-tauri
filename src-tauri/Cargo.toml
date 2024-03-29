@@ -1,6 +1,6 @@
 [package]
 name = "audio-visualization-tauri"
-version = "1.0.0"
+version = "1.0.0-indev"
 description = "A Tauri App"
 authors = ["Picorims<picorims.contact@gmail.com>"]
 license = "AGPL-3.0-or-later"
@@ -16,7 +16,7 @@ tauri-build = { version = "1.5", features = [] }
 tauri = { version = "1.5", features = [ "protocol-asset", "path-all", "fs-remove-file", "fs-copy-file", "fs-rename-file", "fs-read-file", "dialog-message", "shell-sidecar", "dialog-open", "shell-open"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rustfft = "6.1.0"
+spectrum-analyzer = "1.5.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
